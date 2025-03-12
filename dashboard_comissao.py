@@ -59,23 +59,31 @@ st.subheader("Upload de Excel para Cálculo em Massa")
 st.markdown("**O arquivo Excel deve conter as seguintes colunas:**")
 st.markdown("- `Valor mês` → Representa o faturamento da venda.")
 st.markdown("- `Margem Vendida %` → Representa a margem operacional da venda.")
+st.markdown("- `Pagamento` → Status da comissão ('Pago', 'Pago Parcialmente', 'Não Pago').")
+st.markdown("- `Valor Pago` → Se 'Pago Parcialmente', informar o valor já pago.")
 file = st.file_uploader("Envie um arquivo Excel", type=["xlsx"])
 
 if file:
     df = pd.read_excel(file)
-    df.columns = df.columns.str.strip()  # Remover espaços extras nos nomes das colunas
+    df.columns = df.columns.str.strip()
     
-    if "Valor mês" in df.columns and "Margem Vendida %" in df.columns:
-        df["Comissão Final"], df["Regra Aplicada"] = zip(*df.apply(lambda row: calcular_comissao(row["Valor mês"], row["Margem Vendida %"] * 100), axis=1))
-        total_comissao = df["Comissão Final"].sum()
+    if "Valor mês" in df.columns and "Margem Vendida %" in df.columns and "Pagamento" in df.columns and "Valor Pago" in df.columns:
+        df_filtrado = df[df["Pagamento"] != "Pago"].copy()  # Ignorar pagamentos já quitados
         
-        # Exibir apenas o valor final de cada comissão
+        df_filtrado["Comissão Final"], df_filtrado["Regra Aplicada"] = zip(*df_filtrado.apply(lambda row: calcular_comissao(row["Valor mês"], row["Margem Vendida %"] * 100), axis=1))
+        df_filtrado["Valor Pago"] = pd.to_numeric(df_filtrado["Valor Pago"], errors='coerce').fillna(0)
+        df_filtrado["Comissão a Receber"] = df_filtrado["Comissão Final"] - df_filtrado["Valor Pago"]
+        total_comissao = df_filtrado["Comissão a Receber"].sum()
+        
+        # Exibir apenas os valores finais e um resumo
         st.subheader("Comissões Calculadas")
-        for index, row in df.iterrows():
-            st.write(f"Venda {index + 1}: {format_currency(row['Comissão Final'])}")
+        for index, row in df_filtrado.iterrows():
+            status = f"(Restante: {format_currency(row['Comissão a Receber'])})" if row["Pagamento"] == "Pago Parcialmente" else ""
+            st.write(f"Venda {index + 1}: {format_currency(row['Comissão Final'])} {status}")
         
-        # Exibir o total
-        st.subheader("Total de Comissões")
-        st.write(f"**{format_currency(total_comissao)}**")
+        st.subheader("Resumo")
+        st.write(f"**Comissões Ignoradas (Pagos):** {len(df) - len(df_filtrado)}")
+        st.write(f"**Comissões Processadas:** {len(df_filtrado)}")
+        st.write(f"**Total de Comissões a Receber:** {format_currency(total_comissao)}")
     else:
-        st.error("O arquivo deve conter as colunas 'Valor mês' e 'Margem Vendida %'.")
+        st.error("O arquivo deve conter as colunas 'Valor mês', 'Margem Vendida %', 'Pagamento' e 'Valor Pago'.")
